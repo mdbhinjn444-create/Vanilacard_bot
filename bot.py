@@ -803,22 +803,74 @@ async def get_fiat_rates() -> dict:
         return {"USD": 1.0, "CAD": 1.38, "AUD": 1.55}
 
 
-async def get_crypto_prices() -> dict:
-    """Fetch live USD prices for BNB and TON from CoinGecko."""
+async def _fetch_bnb_price() -> float:
+    """Fetch live BNB/USD price. Tries Binance then CoinGecko."""
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(
+                "https://api.binance.com/api/v3/ticker/price",
+                params={"symbol": "BNBUSDT"},
+            )
+            price = float(resp.json()["price"])
+            logger.info("Binance BNB price: $%.2f", price)
+            return price
+    except Exception as e:
+        logger.warning("Binance BNB failed: %s", e)
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             resp = await client.get(
                 "https://api.coingecko.com/api/v3/simple/price",
-                params={"ids": "binancecoin,the-open-network", "vs_currencies": "usd"},
+                params={"ids": "binancecoin", "vs_currencies": "usd"},
             )
-            data = resp.json()
-            return {
-                "bnb": data.get("binancecoin", {}).get("usd", 600),
-                "ton": data.get("the-open-network", {}).get("usd", 5),
-            }
+            price = float(resp.json().get("binancecoin", {}).get("usd") or 600)
+            logger.info("CoinGecko BNB price: $%.2f", price)
+            return price
     except Exception as e:
-        logger.warning("Price fetch failed: %s — using fallback prices", e)
-        return {"bnb": 600, "ton": 5}
+        logger.warning("CoinGecko BNB failed: %s — using fallback", e)
+        return 600.0
+
+
+async def _fetch_ton_price() -> float:
+    """Fetch live Toncoin (The Open Network) price in USD.
+    NOTE: Binance TONUSDT = Tokamak Network (wrong coin) — never use it for Toncoin.
+    Primary: CoinGecko (id=the-open-network).
+    Fallback: Gate.io spot ticker.
+    """
+    # --- Primary: CoinGecko with correct coin ID ---
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(
+                "https://api.coingecko.com/api/v3/simple/price",
+                params={"ids": "the-open-network", "vs_currencies": "usd"},
+            )
+            price = float(resp.json()["the-open-network"]["usd"])
+            logger.info("CoinGecko Toncoin price: $%.4f", price)
+            return price
+    except Exception as e:
+        logger.warning("CoinGecko TON failed: %s", e)
+
+    # --- Fallback: Gate.io ---
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(
+                "https://api.gateio.ws/api/v4/spot/tickers",
+                params={"currency_pair": "TON_USDT"},
+            )
+            price = float(resp.json()[0]["last"])
+            logger.info("Gate.io Toncoin price: $%.4f", price)
+            return price
+    except Exception as e:
+        logger.warning("Gate.io TON failed: %s — using fallback", e)
+        return 5.0
+
+
+async def get_crypto_prices() -> dict:
+    """Fetch live BNB and TON prices in USD independently."""
+    bnb_price, ton_price = await asyncio.gather(
+        _fetch_bnb_price(),
+        _fetch_ton_price(),
+    )
+    return {"bnb": bnb_price, "ton": ton_price}
 
 
 def generate_qr_bytes(data: str) -> io.BytesIO:
