@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: vanilla-exchange-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 attached_assets/bot_1784464217784.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
