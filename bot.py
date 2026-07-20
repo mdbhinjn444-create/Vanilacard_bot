@@ -384,7 +384,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("👤Profile", callback_data="profile")],
         [InlineKeyboardButton("🖥️ Vendor Dashboard", callback_data="vendor"),
          InlineKeyboardButton("🔎Checker", url="http://t.me/VanilaChecker_bot")],
-        [InlineKeyboardButton("📢Stock update", url="https://t.me/+0-iT-C83KNkxODk1")],
+        [InlineKeyboardButton("📢Stock update", url="https://t.me/+ZNptfmbBb-oxNDQ9")],
     ]
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
