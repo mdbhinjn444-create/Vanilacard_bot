@@ -831,37 +831,23 @@ async def _fetch_bnb_price() -> float:
 
 
 async def _fetch_ton_price() -> float:
-    """Fetch live Toncoin (The Open Network) price in USD.
-    NOTE: Binance TONUSDT = Tokamak Network (wrong coin) — never use it for Toncoin.
-    Primary: CoinGecko (id=the-open-network).
-    Fallback: Gate.io spot ticker.
+    """Fetch live Toncoin (The Open Network) price in USD via CoinGecko.
+    IMPORTANT: Binance TONUSDT = Tokamak Network (different coin, $1.60) — never use it.
+    Gate.io and KuCoin have delisted TON. CoinGecko is the only reliable source.
     """
-    # --- Primary: CoinGecko with correct coin ID ---
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
+        async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 "https://api.coingecko.com/api/v3/simple/price",
                 params={"ids": "the-open-network", "vs_currencies": "usd"},
             )
-            price = float(resp.json()["the-open-network"]["usd"])
-            logger.info("CoinGecko Toncoin price: $%.4f", price)
+            data = resp.json()
+            price = float(data["the-open-network"]["usd"])
+            logger.info("TON price (CoinGecko): $%.4f", price)
             return price
     except Exception as e:
-        logger.warning("CoinGecko TON failed: %s", e)
-
-    # --- Fallback: Gate.io ---
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.get(
-                "https://api.gateio.ws/api/v4/spot/tickers",
-                params={"currency_pair": "TON_USDT"},
-            )
-            price = float(resp.json()[0]["last"])
-            logger.info("Gate.io Toncoin price: $%.4f", price)
-            return price
-    except Exception as e:
-        logger.warning("Gate.io TON failed: %s — using fallback", e)
-        return 5.0
+        logger.warning("CoinGecko TON failed: %s — using fallback $3.00", e)
+        return 3.0
 
 
 async def get_crypto_prices() -> dict:
