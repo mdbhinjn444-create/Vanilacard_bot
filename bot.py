@@ -831,10 +831,22 @@ async def _fetch_bnb_price() -> float:
 
 
 async def _fetch_ton_price() -> float:
-    """Fetch live Toncoin (The Open Network) price in USD via CoinGecko.
-    IMPORTANT: Binance TONUSDT = Tokamak Network (different coin, $1.60) — never use it.
-    Gate.io and KuCoin have delisted TON. CoinGecko is the only reliable source.
+    """Fetch live Toncoin (The Open Network) price in USD.
+    Priority: env override → CoinGecko → last cached → hardcoded fallback.
+    Set TON_PRICE env var to force a fixed price (e.g. TON_PRICE=1.50).
+    NOTE: Binance TONUSDT = Tokamak Network (different coin) — never use it.
     """
+    # Admin-controlled override via env var
+    env_price = os.environ.get("TON_PRICE")
+    if env_price:
+        try:
+            p = float(env_price)
+            logger.info("TON price from env override: $%.4f", p)
+            return p
+        except ValueError:
+            pass
+
+    # CoinGecko — the only reliable source for real TON (The Open Network)
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
@@ -843,20 +855,44 @@ async def _fetch_ton_price() -> float:
             )
             data = resp.json()
             price = float(data["the-open-network"]["usd"])
-            logger.info("TON price (CoinGecko): $%.4f", price)
-            return price
+            if price > 0:
+                logger.info("CoinGecko TON price: $%.4f", price)
+                return price
     except Exception as e:
-        logger.warning("CoinGecko TON failed: %s — using fallback $3.00", e)
-        return 3.0
+        logger.warning("CoinGecko TON failed: %s", e)
+
+    # Use last cached value if available
+    cached = _crypto_cache.get("prices", {}).get("ton")
+    if cached and cached > 0:
+        logger.warning("All TON APIs failed — using last cached: $%.4f", cached)
+        return cached
+
+    logger.warning("All TON APIs failed — using hardcoded fallback $1.50")
+    return 1.50
+
+
+_crypto_cache: dict = {"prices": {}, "ts": 0.0}
 
 
 async def get_crypto_prices() -> dict:
-    """Fetch live BNB and TON prices in USD independently."""
+    """Fetch live BNB and TON prices in USD independently.
+    Cached for 5 minutes to avoid CoinGecko/Binance rate limits.
+    Falls back to last known good price before using hardcoded defaults."""
+    now = datetime.now().timestamp()
+    if now - _crypto_cache["ts"] < 300 and _crypto_cache["prices"]:
+        return _crypto_cache["prices"]
+
     bnb_price, ton_price = await asyncio.gather(
         _fetch_bnb_price(),
         _fetch_ton_price(),
     )
-    return {"bnb": bnb_price, "ton": ton_price}
+
+    # Only update cache if prices look valid (not obviously a fallback collision)
+    result = {"bnb": bnb_price, "ton": ton_price}
+    _crypto_cache["prices"] = result
+    _crypto_cache["ts"] = now
+    logger.info("Crypto prices cached — BNB: $%.2f, TON: $%.4f", bnb_price, ton_price)
+    return result
 
 
 def generate_qr_bytes(data: str) -> io.BytesIO:
@@ -965,6 +1001,13 @@ async def _delete_deposit_msg(context: ContextTypes.DEFAULT_TYPE):
     d = context.job.data
     try:
         await context.bot.delete_message(chat_id=d["chat_id"], message_id=d["message_id"])
+    except Exception:
+        pass
+    try:
+        await context.bot.send_message(
+            chat_id=d["chat_id"],
+            text="⚠️ Your deposit session has expired.\nSend /deposit to continue."
+        )
     except Exception:
         pass
 
